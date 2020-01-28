@@ -1,0 +1,180 @@
+#!/usr/bin/python
+
+import urllib, json, smtplib
+import config
+import time
+#from twilio.rest import Client
+from slackclient import SlackClient
+from datetime import datetime
+from pytz import timezone
+from binance.client import Client
+
+#Slack Setup
+
+sc = SlackClient(slack_token)
+fmt = "%Y-%m-%d %H:%M:%S"
+percentageLow = 0.10
+percentageHigh = 0.50
+percentageMed = 0.20
+start_time = 0
+
+LowTexted = False
+MedTexted = False
+HighTexted = False
+sellBaseTexted = False
+
+
+
+buyBaseTexted = False
+
+client = Client(config.api_key, config.api_secret)
+
+while True:
+
+    nowUTC = datetime.now(timezone('UTC'))
+    nowEST = nowUTC.astimezone(timezone('US/Eastern')).strftime(fmt)
+
+    #API URL for NEO and GAS prices
+    urlNEO = "https://www.binance.com/api/v1/ticker/price?symbol=NEOBTC"
+    urlGAS = "https://www.binance.com/api/v1/ticker/price?symbol=GASBTC"
+    responseNEO=urllib.urlopen(urlNEO)
+    responseGAS=urllib.urlopen(urlGAS)
+    dataNEO=json.loads(responseNEO.read())
+    dataGAS=json.loads(responseGAS.read())  
+    priceNEO=float(dataNEO['price'])
+    priceGAS=float(dataGAS['price'])
+    ratio = priceNEO/priceGAS
+
+    #Populate NEO Market Data
+    ordersNEO = (client.get_ticker(symbol='NEOBTC'))
+    weightedAvgPriceNEO=float(ordersNEO['weightedAvgPrice'])
+    lastQtyNEO=float(ordersNEO['lastQty'])
+    bidPriceNEO=float(ordersNEO['bidPrice'])
+    bidQtyNEO=float(ordersNEO['bidQty'])
+    askPriceNEO=float(ordersNEO['askPrice'])
+    askQtyNEO=float(ordersNEO['askQty'])
+
+    #Populate GAS Market Data
+    ordersGAS = (client.get_ticker(symbol='GASBTC'))
+    weightedAvgPriceGAS=float(ordersGAS['weightedAvgPrice'])
+    lastPriceGAS=float(ordersGAS['lastPrice'])
+    lastQtyGAS=float(ordersGAS['lastQty'])
+    bidPriceGAS=float(ordersGAS['bidPrice'])
+    bidQtyGAS=float(ordersGAS['bidQty'])
+    askPriceGAS=float(ordersGAS['askPrice'])
+    askQtyGAS=float(ordersGAS['askQty'])
+
+    sellNEORatio = bidPriceNEO/askPriceGAS
+    buyNEORatio = askPriceNEO/bidPriceGAS
+    avgRatio = weightedAvgPriceNEO/weightedAvgPriceGAS
+    elapsed_time = time.time() - start_time
+
+    if ratio > avgRatio:
+        lastPercent = ((ratio / avgRatio) - 1) * 100
+    elif avgRatio > ratio:
+        lastPercent = -((avgRatio / ratio) - 1) * 100
+
+    sc.api_call(
+        "chat.postMessage",
+        channel="#bot56rollingprices",
+        text="%s: (%.2f%%) Ratio: %.6f avgRatio: %.6f LastPriceNEO: %.6f  LastPriceGAS: %.6f" % (nowEST, lastPercent, ratio, avgRatio, priceNEO, priceGAS)
+    )
+
+    if (elapsed_time >= 540):
+        LowTexted = False
+        #buyLowTexted = False
+    if (elapsed_time >= 180):
+        #sellMedTexted = False
+        MedTexted = False
+    if (elapsed_time >= 60):
+        #sellHighTexted = False
+        HighTexted = False
+    if (elapsed_time >= 150):
+        sellBaseTexted = False
+        buyBaseTexted = False
+
+    #SELL 50% NEO BUY GAS SLACK NOTIFICATION
+    if (sellNEORatio >= (avgRatio * (1 + percentageLow))):
+
+        ratioPercent = ((sellNEORatio / avgRatio) - 1) * 100
+
+        #if ratio is around 1% higher than moving average and alreadyTexted != 1 then notfiy
+        if (sellNEORatio < (avgRatio * (1 + percentageHigh))) and (LowTexted == False):
+            sc.api_call(
+                "chat.postMessage",
+                channel="#buygassellneo",
+                #text="%s: sellNEORatio is ~%.2f%% above the moving average: %.6f bidPriceNEO: %.6f bidQtyNEO: %.2f askPriceGAS: %.6f  askQtyGAS: %.2f avgRatio %.6f" % (nowEST, ratioPercent, sellNEORatio, bidPriceNEO, bidQtyNEO, askPriceGAS, askQtyGAS, avgRatio)
+                text="%s: (+%.2f%%) buyGASratio: %.6f  avgRatio: %.6f bidNEO: %.6f askGAS: %.6f  bidNEO_qty: %.2f askGAS_qty: %.2f" % (nowEST, ratioPercent, sellNEORatio, avgRatio, bidPriceNEO, askPriceGAS, bidQtyNEO, askQtyGAS)
+                )
+
+            LowTexted = True
+            MedTexted = HighTexted = sellBaseTexted = buyBaseTexted = False
+            start_time = time.time()
+
+        #But if ratio moves higher than 5% and already texted != 5 then notify
+        elif (sellNEORatio >= (avgRatio * (1 + percentageHigh))) and (HighTexted == False):
+            sc.api_call(
+                "chat.postMessage",
+                channel="#buygassellneo",
+                #text="%s: sellNEORatio is ~%.2f%% above the moving average: %.6f bidPriceNEO: %.6f bidQtyNEO: %.2f askPriceGAS: %.6f  askQtyGAS: %.2f avgRatio %.6f" % (nowEST, ratioPercent, sellNEORatio, bidPriceNEO, bidQtyNEO, askPriceGAS, askQtyGAS, avgRatio)
+                text="%s: (+%.2f%%) buyGASratio: %.6f  avgRatio: %.6f bidNEO: %.6f askGAS: %.6f  bidNEO_qty: %.2f askGAS_qty: %.2f" % (nowEST, ratioPercent, sellNEORatio, avgRatio, bidPriceNEO, askPriceGAS, bidQtyNEO, askQtyGAS)
+                )
+
+            HighTexted = True
+            MedTexted = LowTexted = sellBaseTexted = buyBaseTexted = False
+            start_time = time.time()
+
+
+    #SELL 50% GAS BUY NEO SLACK NOTIFICATION
+    elif (buyNEORatio < (avgRatio * (1 - percentageLow))): 
+
+        ratioPercent = ((avgRatio / buyNEORatio) - 1) * 100
+
+        #if the ratio is around 1% lower than the moving average and already texted != 2 then notify
+        if (buyNEORatio > (avgRatio * (1 - percentageHigh))) and (LowTexted == False):
+            sc.api_call(
+                "chat.postMessage",
+                channel="#buyneosellgas",
+                text="%s: (-%.2f%%) buyNEOratio: %.6f  avgRatio: %.6f askNEO: %.6f bidGAS: %.6f  askNEO_qty: %.2f bidGAS_qty: %.2f" % (nowEST, ratioPercent, buyNEORatio, avgRatio, askPriceNEO, bidPriceGAS, askQtyNEO, bidQtyGAS)
+                )
+
+            LowTexted = True
+            MedTexted = HighTexted = sellBaseTexted = buyBaseTexted = False
+            start_time = time.time()
+
+        #But if ratio moves lower than 5% and alreadyTexted != 5 then notify
+        elif (buyNEORatio <= (avgRatio * (1 - percentageHigh))) and (HighTexted == False):
+            sc.api_call(
+                "chat.postMessage",
+                channel="#buyneosellgas",
+                text="%s: (-%.2f%%) buyNEOratio: %.6f  avgRatio: %.6f askNEO: %.6f bidGAS: %.6f  askNEO_qty: %.2f bidGAS_qty: %.2f" % (nowEST, ratioPercent, buyNEORatio, avgRatio, askPriceNEO, bidPriceGAS, askQtyNEO, bidQtyGAS)
+                )
+
+            HighTexted = True
+            MedTexted = LowTexted = sellBaseTexted = buyBaseTexted = False
+            start_time = time.time()
+
+    #Back at the Average Ratio
+    if ((buyNEORatio - avgRatio) > 0) and ((buyNEORatio - avgRatio) < 0.01) and (buyBaseTexted == False): 
+
+        sc.api_call(
+            "chat.postMessage",
+            channel="#approachingaverage",
+            text="%s: buyNEORatio Approaching Average Ratio: %.6f avgRatio: %.6f" % (nowEST, buyNEORatio, avgRatio)
+            )
+        buyBaseTexted = True
+        MedTexted = LowTexted = HighTexted = False
+        start_time = time.time()
+
+    if ((avgRatio - sellNEORatio) >  0) and ((avgRatio - sellNEORatio) < 0.01) and (sellBaseTexted == False): 
+        sc.api_call(
+            "chat.postMessage",
+            channel="#approachingaverage",
+            text="%s: buyGASratio Approaching Average Ratio: %.6f avgRatio: %.6f" % (nowEST, sellNEORatio, avgRatio)
+            )
+        sellBaseTexted = True
+        MedTexted = LowTexted = HighTexted = False
+        start_time = time.time()
+   
+
+

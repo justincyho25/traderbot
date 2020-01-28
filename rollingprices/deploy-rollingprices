@@ -1,0 +1,23 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: rollingprices
+  namespace: traderbot-prices
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: rollingprices
+    spec:
+      containers:
+      - name: rollingprices
+        image: gcr.io/traderbot56/rollingprices
+        volumeMounts:
+        - name: config-volume
+          mountPath: /tmp/traderbot56/config.py
+          subPath: config.py
+      volumes:
+      - name: config-volume
+        secret:
+          secretName: traderbot-secrets
